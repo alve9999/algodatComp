@@ -3,119 +3,98 @@
 #include <stdbool.h>
 #include <string.h>
 #include <omp.h>
-#define BIG 1410065408
+#include <limits.h>
 
-
-
-bool dfs(int u, int setASize, int* pairA, int* pairB, int* dist, int* visited, int iteration, int** graph, int* graphColSize) {
-    if (u == setASize) return true;
+bool bfs(int** graph, int graphSize, int* graphColSize, int* pairU, int* pairV, int* dist) {
+    int queue[graphSize];
+    int front = 0, rear = 0;
     
-    visited[u] = iteration; 
+    for (int u = 0; u < graphSize; u++) {
+        if (pairU[u] == -1) {
+            dist[u] = 0;
+            queue[rear++] = u; 
+        } else {
+            dist[u] = INT_MAX;
+        }
+    }
+    
+    dist[graphSize] = INT_MAX;
+    
 
-    for (int i = 0; i < graphColSize[u]; i++) {
-        int v = graph[u][i];
-        int nextU = (pairB[v] == -1) ? setASize : pairB[v];
-
-        if (visited[nextU] == iteration) continue;
-        if (dist[nextU] == dist[u] + 1) {
-            if (dfs(nextU, setASize, pairA, pairB, dist, visited, iteration, graph, graphColSize)) {
-                    pairB[v] = u;
-                    pairA[u] = v;
-                return true;
+    while (front < rear) {
+        int u = queue[front++];
+        
+        if (u != graphSize) {
+            for (int j = 0; j < graphColSize[u]; j++) {
+                int v = graph[u][j];
+                
+                if (pairV[v] == -1) {
+                    dist[graphSize] = dist[u] + 1;
+                } else if (dist[pairV[v]] == INT_MAX) {
+                    dist[pairV[v]] = dist[u] + 1;
+                    queue[rear++] = pairV[v];
+                }
             }
         }
     }
+    
+    return dist[graphSize] != INT_MAX;
+}
+
+bool dfs(int** graph, int graphSize, int* graphColSize, int* pairU, int* pairV, int* dist, int u) {
+    if (u == graphSize) return true;
+    for (int j = 0; j < graphColSize[u]; j++) {
+        int v = graph[u][j];
+        
+        if (pairV[v] == -1 || (dist[pairV[v]] == dist[u] + 1 && dfs(graph, graphSize, graphColSize, pairU, pairV, dist, pairV[v]))) {
+            pairV[v] = u;
+            pairU[u] = v;
+            return true;
+        }
+    }
+    
+    dist[u] = INT_MAX;
     return false;
 }
 
-int maximumBipartiteMatching(int** graph, int graphSize, int* graphColSize, int* matching) {
-    int setASize = graphSize;
-    
-    int* pairA = (int*)calloc(setASize, sizeof(int));
-    int* pairB = (int*)calloc(graphSize, sizeof(int)); 
-    int* dist = (int*)malloc((setASize + 1) * sizeof(int));
-    int* visited = (int*)calloc(setASize, sizeof(int));
-    
-    memset(pairA, -1, setASize * sizeof(int));
+
+int hopcroftKarp(int** graph, int graphSize, int* graphColSize, int* matching) {
+
+    int* pairA = (int*)malloc(graphSize * sizeof(int));
+    int* pairB = (int*)malloc(graphSize * sizeof(int));
+    int* dist = (int*)malloc((graphSize + 1) * sizeof(int));
+
+    memset(pairA, -1, graphSize * sizeof(int));
     memset(pairB, -1, graphSize * sizeof(int));
     
     int matchingSize = 0;
-    int iteration = 0;
-
-
-    int* level = (int*)malloc((setASize + 1) * sizeof(int));
-
-    while (1) {
-        memset(dist,BIG,(setASize + 1) * sizeof(int));
-        for (int i = 0; i <= setASize; i++) {
-            dist[i] = BIG;
-        }
-        
-        int levelStart = 0;
-        int levelEnd = 0;
-
-        for (int u = 0; u < setASize; u++) {
-            if (pairA[u] == -1) {
-                dist[u] = 0;
-                level[levelEnd++] = u;
-            }
-        }
-
-        bool pathFound = false;
-        while (levelStart < levelEnd && !pathFound) {
-            int levelSize = levelEnd - levelStart;
-            int newLevelEnd = levelEnd;
-            for (int i = 0; i < levelSize; i++) {
-                int u = level[levelStart + i];
-
-                if (u == setASize) {
-                    pathFound = true;
-                    continue;
-                }
-
-                for (int j = 0; j < graphColSize[u]; j++) {
-                    int v = graph[u][j];
-                    int nextU = (pairB[v] == -1) ? setASize : pairB[v];
-
-                    if (dist[nextU] == BIG) {
-                        dist[nextU] = dist[u] + 1;
-                        level[newLevelEnd++] = nextU;
-                    }
-                }
-            }
-
-            levelStart += levelSize;
-            levelEnd = newLevelEnd;
-
-        }
-        
-        if (dist[setASize] == BIG) break;
-        iteration++;
-        for (int u = 0; u < setASize; u++) {
-            if (pairA[u] == -1) {
-                if (dfs(u, setASize, pairA, pairB, dist, visited, iteration, graph, graphColSize)) {
-                    matchingSize++;
-                }
+    while (bfs(graph, graphSize, graphColSize, pairA, pairB, dist)) {
+        for (int u = 0; u < graphSize; u++) {
+            if (pairA[u] == -1 && dfs(graph, graphSize, graphColSize, pairA, pairB, dist, u)) {
+                matchingSize++;
             }
         }
     }
-    
-    for (int i = 0; i < setASize; i++) {
-        matching[i] = pairA[i];
+    #pragma omp parallel for
+    for (int u = 0; u < graphSize; u++) {
+        matching[u] = pairA[u];
     }
-    
-    free(pairA);
-    free(pairB);
-    free(dist);
-    free(visited);
+
     
     return matchingSize;
 }
 
-#define MAX_NODES 200000
+
+
+int maximumBipartiteMatching(int** graph, int graphSize, int* graphColSize, int* matching) {
+    return hopcroftKarp(graph, graphSize, graphColSize, matching);
+}
+
+
 
 int** createGraphFromArrays(int setASize, int** edgeLists, int* edgeCounts) {
     int** graph = (int**)malloc(setASize * sizeof(int*));
+    #pragma omp parallel for
     for (int i = 0; i < setASize; i++) {
         graph[i] = (int*)malloc(edgeCounts[i] * sizeof(int));
         for (int j = 0; j < edgeCounts[i]; j++) {
