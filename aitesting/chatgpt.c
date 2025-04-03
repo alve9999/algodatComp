@@ -58,39 +58,36 @@ int dequeue(Queue *q) {
 }
 
 // BFS routine of Hopcroft-Karp. Returns 1 if there is an augmenting path.
-int bfs() {
-    Queue q;
-    initQueue(&q, nLeft);
-    
+int bfs(Queue *q) {
+
     // Initialize distances for all left vertices
     for (int u = 1; u <= nLeft; u++) {
         if (pairU[u] == 0) {
             dist[u] = 0;
-            enqueue(&q, u);
+            enqueue(q, u);
         } else {
             dist[u] = INF;
         }
     }
-    
+
     // Set the distance for the dummy vertex 0
     dist[0] = INF;
-    
+
     // Process the queue
-    while (!isEmpty(&q)) {
-        int u = dequeue(&q);
+    while (!isEmpty(q)) {
+        int u = dequeue(q);
         if (dist[u] < dist[0]) {
             // Traverse all neighbors v of u
             for (int i = 0; i < adj[u].size; i++) {
                 int v = adj[u].neighbors[i];
-                if (dist[pairV[v]] == INF) {
+                if (dist[pairV[v]] == INF) { // COSTLY LINE
                     dist[pairV[v]] = dist[u] + 1;
-                    enqueue(&q, pairV[v]);
+                    enqueue(q, pairV[v]);
                 }
             }
         }
     }
-    
-    freeQueue(&q);
+
     return dist[0] != INF;
 }
 
@@ -114,12 +111,15 @@ int dfs(int u) {
 // Hopcroft-Karp algorithm. Returns the maximum matching.
 int hopcroftKarp() {
     int matching = 0;
-    while (bfs()) {
+    Queue q;
+    initQueue(&q, nLeft);
+    while (bfs(&q)) {
         for (int u = 1; u <= nLeft; u++) {
             if (pairU[u] == 0 && dfs(u))
                 matching++;
         }
     }
+    freeQueue(&q);
     return matching;
 }
 
@@ -138,14 +138,14 @@ int main() {
     int u, v;
     int capacityEdges = 100;
     int countEdges = 0;
-    
+
     // Temporary storage for edges
     int (*edges)[2] = malloc(capacityEdges * sizeof(*edges));
-    
+
     // Determine the maximum vertex id on each side.
     nLeft = 0;
     nRight = 0;
-    
+
     // Read input edges from stdin
     while (scanf("%d %d", &u, &v) == 2) {
         if (countEdges == capacityEdges) {
@@ -158,7 +158,7 @@ int main() {
         if (u > nLeft) nLeft = u;
         if (v > nRight) nRight = v;
     }
-    
+
     // Allocate memory for the left adjacency lists (1-indexed)
     adj = (AdjList *)malloc((nLeft + 1) * sizeof(AdjList));
     for (int i = 0; i <= nLeft; i++) {
@@ -166,7 +166,7 @@ int main() {
         adj[i].size = 0;
         adj[i].capacity = 0;
     }
-    
+
     // Populate the graph with edges
     for (int i = 0; i < countEdges; i++) {
         u = edges[i][0];
@@ -174,18 +174,18 @@ int main() {
         addEdge(u, v);
     }
     free(edges);
-    
+
     // Allocate arrays for pairU, pairV, and dist.
     pairU = (int *)calloc(nLeft + 1, sizeof(int)); // indices 1..nLeft; 0 used as NIL.
     pairV = (int *)calloc(nRight + 1, sizeof(int)); // indices 1..nRight.
     dist  = (int *)malloc((nLeft + 1) * sizeof(int));
-    
+
     // Compute the maximum matching.
     int matching = hopcroftKarp();
-    
+
     // Output the number of matches.
     printf("%d\n", matching);
-    
+
     // Free allocated memory.
     for (int i = 0; i <= nLeft; i++) {
         free(adj[i].neighbors);
@@ -194,7 +194,6 @@ int main() {
     free(pairU);
     free(pairV);
     free(dist);
-    
+
     return matching;
 }
-
