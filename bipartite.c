@@ -4,12 +4,229 @@
 #include <string.h>
 #include <omp.h>
 #include <limits.h>
+#include <time.h>
+#include <stdatomic.h>
+
+typedef struct {
+    size_t        u;
+    size_t        v;
+} xedge_t;
+/*
+int dfs_la_ts(int** graph, int* graphColSize,int graphSize,int* lookahead,int u,atomic_int* visited,int* pairA,int* pairB){
+    int j = 0;
+    //int j = lookahead[u];
+    for (int i = 0; i < graphColSize[u]; i++, j = (j+1)%graphColSize[u]) {
+        int v = graph[u][j];
+        if(pairB[v] == -1){
+            if (atomic_fetch_add(&visited[v], 1) == 0) {
+                //lookahead[u] = (j+1)%graphColSize[u];
+                return v;
+            }
+            if(atomic_fetch_add(&visited[v],1) == 0){
+                int index = dfs_la_ts(graph,graphColSize,graphSize,lookahead,pairB[v],visited,pairA,pairB);
+                if(index != -1){
+                    return index;
+                }
+            }
+        }
+    }
+
+    
+    for (int i = 0; i < graphColSize[u]; i++) {
+        int v = graph[u][i];
+        if(atomic_fetch_add(&visited[v],1) == 0){
+            int index = dfs_la_ts(graph,graphColSize,graphSize,lookahead,pairB[v],visited,pairA,pairB);
+            if(index != -1){
+                return index;
+            }
+        }
+    }
+    return -1;
+}
+
+
+int parallel_pothen_fan(int** graph, int graphSize, int* graphColSize, int* pairA, int* pairB){
+    int* lookahead = (int*)malloc(graphSize * sizeof(int));
+    for (int i = 0; i < graphSize; i++) {
+        lookahead[i] = 0;
+    }
+    int path_found = 1;
+    atomic_int matchings = 0;
+    atomic_int* visited = (atomic_int*)calloc(graphSize, sizeof(atomic_int));
+    while(path_found){
+        for(int i = 0; i < graphSize; i+=2) {
+            atomic_store(&visited[i], 0);
+        }
+        path_found = 0;
+        for(int i = 1; i < graphSize; i+=2){
+            int u = dfs_la_ts(graph,graphColSize,graphSize,lookahead,i,visited,pairA,pairB);
+            if(u != -1){
+                path_found = 1;
+                pairB[u] = i;
+                pairA[i] = u;
+                atomic_fetch_add(&matchings,1);
+            }
+        }
+    }
+    return matchings;
+}
+*/
+int dfs_la_ts(int** graph, int* graphColSize, int graphSize, int* lookahead, 
+              int u, atomic_int* visited, int* pairA, int* pairB) {
+    // Skip processing if u is -1 (unmatched vertex in Y)
+    if (u == -1) return -1;
+    
+    // Lookahead step - start from lookahead position and try one round
+    int start = lookahead[u];
+    for (int i = 0; i < graphColSize[u]; i++) {
+        int idx = (start + i) % graphColSize[u];
+        int v = graph[u][idx];
+        
+        // Update lookahead for next time
+        lookahead[u] = (idx + 1) % graphColSize[u];
+        
+        // Found unmatched vertex in Y
+        if (pairB[v] == -1) {
+            // Atomically check if we're the first to visit
+            if (atomic_fetch_add(&visited[v], 1) == 0) {
+                return v;  // Found an augmenting path
+            }
+        }
+    }
+    
+    // Regular DFS step - try all neighbors
+    for (int i = 0; i < graphColSize[u]; i++) {
+        int v = graph[u][i];
+        
+        // Check if v is already matched to someone
+        if (pairB[v] != -1) {
+            // Atomically check if we're the first to visit
+            if (atomic_fetch_add(&visited[v], 1) == 0) {
+                // Continue DFS from the mate of v
+                int result = dfs_la_ts(graph, graphColSize, graphSize, lookahead, 
+                                    pairB[v], visited, pairA, pairB);
+                if (result != -1) {
+                    return result;
+                }
+            }
+        }
+    }
+    
+    return -1;  // No augmenting path found
+}
+
+int parallel_pothen_fan(int** graph, int graphSize, int* graphColSize, int* pairA, int* pairB) {
+    // Initialize matching structures
+    for (int i = 0; i < graphSize; i++) {
+        pairA[i] = -1;
+    }
+    
+    for (int i = 0; i < graphSize; i++) {
+        pairB[i] = -1;
+    }
+    
+    // Initialize lookahead array
+    int* lookahead = (int*)malloc(graphSize * sizeof(int));
+    for (int i = 0; i < graphSize; i++) {
+        lookahead[i] = 0;
+    }
+    
+    // Initialize atomic visited array
+    atomic_int* visited = (atomic_int*)malloc(graphSize * sizeof(atomic_int));
+    
+    int path_found = 1;
+    int matchings = 0;
+    int iteration = 0;
+    
+    // Main loop - continue until no more augmenting paths found
+    while (path_found) {
+        path_found = 0;
+        
+        // Reset visited array for this iteration
+        for (int i = 0; i < graphSize; i++) {
+            atomic_store(&visited[i], 0);
+        }
+        
+        // In a sequential version, we process one vertex at a time
+        // In parallel, you would distribute this loop across threads
+        for (int u = 0; u < graphSize; u++) {
+            // Only process unmatched vertices in X
+            if (pairA[u] == -1) {
+                int v = dfs_la_ts(graph, graphColSize, graphSize, lookahead, u, visited, pairA, pairB);
+                
+                if (v != -1) {
+                    // Augment the matching
+                    pairA[u] = v;
+                    pairB[v] = u;
+                    matchings++;
+                    path_found = 1;
+                }
+            }
+        }
+        
+        iteration++;
+    }
+    
+    // Free allocated memory
+    free(lookahead);
+    free(visited);
+    
+    return matchings;
+}
+
+void matchAndUpdate(int** graph, int* graphColSize, int* deg, int* pairA, int* pairB, bool* visited, int u, int* matchingSize) {
+    if (visited[u]) return;
+    visited[u] = true;
+    for (int j = 0; j < graphColSize[u]; j++) {
+        int v = graph[u][j];
+        if (!visited[v]) {
+            visited[v] = true;
+            *matchingSize += 1;
+            pairA[u] = v;
+            pairB[v] = u;
+            for (int i = 0; i < graphColSize[v]; i++) {
+                int w = graph[v][i];
+                deg[w]--;
+                if (deg[w] == 1) {
+                    matchAndUpdate(graph, graphColSize, deg, pairA, pairB, visited, w, matchingSize);
+                }
+            }
+            break;
+        }
+    }
+}
+
+
+int karpSipser(int** graph, int graphSize, int* graphColSize, int* pairA, int* pairB){
+    int* deg = (int*)malloc(graphSize * sizeof(int));
+    memcpy(deg, graphColSize, graphSize * sizeof(int));
+    bool* visited = (bool*)calloc(graphSize, sizeof(bool));
+    int* deg1 = (int*)malloc(graphSize * sizeof(int));
+    int* deg2 = (int*)malloc(graphSize * sizeof(int));
+    int deg1Size = 0;
+    int deg2Size = 0;
+    for (int i = 1; i < graphSize; i+=2) {
+        if (deg[i] == 1) {
+            deg1[deg1Size++] = i;
+        } else{
+            deg2[deg2Size++] = i;
+        }
+    }
+    int matchingSize = 0;
+    for(int i = 0; i < deg1Size; i++) {
+        matchAndUpdate(graph, graphColSize, deg, pairA, pairB, visited, deg1[i], &matchingSize);
+    }
+    for(int i = 0; i < deg2Size; i++) {
+        matchAndUpdate(graph, graphColSize, deg, pairA, pairB, visited, deg2[i], &matchingSize);
+    }
+    return matchingSize;
+}
 
 bool bfs(int** graph, int graphSize, int* graphColSize, int* pairU, int* pairV, int* dist) {
-    int queue[graphSize];
+    int queue[graphSize + 1];
     int front = 0, rear = 0;
-    
-    for (int u = 0; u < graphSize; u++) {
+
+    for (int u = 1; u < graphSize; u+=2) {
         if (pairU[u] == -1) {
             dist[u] = 0;
             queue[rear++] = u; 
@@ -18,19 +235,20 @@ bool bfs(int** graph, int graphSize, int* graphColSize, int* pairU, int* pairV, 
         }
     }
     
-    dist[graphSize] = INT_MAX;
+    dist[graphSize] = INT_MAX; 
     
-
     while (front < rear) {
         int u = queue[front++];
         
-        if (u != graphSize) {
+        if (dist[u] < dist[graphSize]) { 
             for (int j = 0; j < graphColSize[u]; j++) {
                 int v = graph[u][j];
-                
+
                 if (pairV[v] == -1) {
                     dist[graphSize] = dist[u] + 1;
-                } else if (dist[pairV[v]] == INT_MAX) {
+                } 
+
+                else if (dist[pairV[v]] == INT_MAX) {
                     dist[pairV[v]] = dist[u] + 1;
                     queue[rear++] = pairV[v];
                 }
@@ -38,112 +256,170 @@ bool bfs(int** graph, int graphSize, int* graphColSize, int* pairU, int* pairV, 
         }
     }
     
+
     return dist[graphSize] != INT_MAX;
 }
 
 bool dfs(int** graph, int graphSize, int* graphColSize, int* pairU, int* pairV, int* dist, int u) {
-    if (u == graphSize) return true;
+    if (u == -1) return true; 
     for (int j = 0; j < graphColSize[u]; j++) {
         int v = graph[u][j];
-        
         if (pairV[v] == -1 || (dist[pairV[v]] == dist[u] + 1 && dfs(graph, graphSize, graphColSize, pairU, pairV, dist, pairV[v]))) {
             pairV[v] = u;
             pairU[u] = v;
             return true;
         }
     }
-    
     dist[u] = INT_MAX;
     return false;
 }
 
+int hopcroftKarp(int** graph, int graphSize, int* graphColSize, int* pairA, int* pairB) {
 
-int hopcroftKarp(int** graph, int graphSize, int* graphColSize, int* matching) {
-
-    int* pairA = (int*)malloc(graphSize * sizeof(int));
-    int* pairB = (int*)malloc(graphSize * sizeof(int));
     int* dist = (int*)malloc((graphSize + 1) * sizeof(int));
 
-    memset(pairA, -1, graphSize * sizeof(int));
-    memset(pairB, -1, graphSize * sizeof(int));
-    
     int matchingSize = 0;
     while (bfs(graph, graphSize, graphColSize, pairA, pairB, dist)) {
-        for (int u = 0; u < graphSize; u++) {
+        for (int u = 1; u < graphSize; u+=2) {
             if (pairA[u] == -1 && dfs(graph, graphSize, graphColSize, pairA, pairB, dist, u)) {
                 matchingSize++;
             }
         }
     }
-    #pragma omp parallel for
-    for (int u = 0; u < graphSize; u++) {
-        matching[u] = pairA[u];
-    }
-
     
     return matchingSize;
 }
 
-
-
 int maximumBipartiteMatching(int** graph, int graphSize, int* graphColSize, int* matching) {
-    return hopcroftKarp(graph, graphSize, graphColSize, matching);
+    int* pairA = (int*)malloc((graphSize+1) * sizeof(int));
+    int* pairB = (int*)malloc((graphSize+1) * sizeof(int));
+    memset(pairA, -1, (graphSize+1) * sizeof(int));
+    memset(pairB, -1, (graphSize+1) * sizeof(int));
+
+    
+    clock_t start_time = clock();
+
+    //int init_matchings = karpSipser(graph, graphSize, graphColSize, pairA, pairB);
+    int init_matchings = 0;
+    // Stop the timer after karpSipser and before hopcroftKarp
+    clock_t end_time_1 = clock();
+    double time_karpSipser = (double)(end_time_1 - start_time) / CLOCKS_PER_SEC;
+    //printf("Time taken by karpSipser: %f seconds\n", time_karpSipser);
+
+    // Now, call hopcroftKarp
+    start_time = clock();
+    //int main_matchings = parallelHopcroftKarp(graph, graphSize, graphColSize,pairA, pairB);
+    int main_matchings = hopcroftKarp(graph, graphSize, graphColSize, pairA, pairB);
+
+    // Stop the timer after hopcroftKarp
+    clock_t end_time_2 = clock();
+    double time_hopcroftKarp = (double)(end_time_2 - start_time) / CLOCKS_PER_SEC;
+    //printf("Time taken by hopcroftKarp: %f seconds\n", time_hopcroftKarp);
+    //printf("%d %d\n", init_matchings, main_matchings);
+    return init_matchings + main_matchings;
 }
 
+int** createGraphFromArrays(size_t n, size_t m, xedge_t e[]) {
+    int* edgeCounts = (int*)calloc(n, sizeof(int));
+    
 
-
-int** createGraphFromArrays(int setASize, int** edgeLists, int* edgeCounts) {
-    int** graph = (int**)malloc(setASize * sizeof(int*));
-    #pragma omp parallel for
-    for (int i = 0; i < setASize; i++) {
-        graph[i] = (int*)malloc(edgeCounts[i] * sizeof(int));
-        for (int j = 0; j < edgeCounts[i]; j++) {
-            graph[i][j] = edgeLists[i][j];
-        }
+    for (size_t i = 0; i < m; i++) {
+        if (e[i].u < n) edgeCounts[e[i].u]++;
+        if (e[i].v < n) edgeCounts[e[i].v]++;
     }
+
+    
+    int** graph = (int**)malloc(n * sizeof(int*));
+    for (size_t i = 0; i < n; i++) {
+        graph[i] = (int*)malloc(edgeCounts[i] * sizeof(int));
+    }
+    
+    int* currentIndex = (int*)calloc(n, sizeof(int));
+    
+
+    for (size_t i = 0; i < m; i++) {
+        if (e[i].u < n)
+            graph[e[i].u][currentIndex[e[i].u]++] = e[i].v;
+        if (e[i].v < n)
+            graph[e[i].v][currentIndex[e[i].v]++] = e[i].u;
+    }
+
+    
+    free(edgeCounts);
+    free(currentIndex);
+    
     return graph;
 }
 
-#include <time.h>
+size_t matching(size_t n, size_t m, xedge_t e[]) {
+    int* edgeCounts = (int*)calloc(n, sizeof(int));
+    for (size_t i = 0; i < m; i++) {
+        edgeCounts[e[i].u]++;
+        edgeCounts[e[i].v]++;
+    }
+    int** graph = (int**)malloc((n+1) * sizeof(int*));
+    
+    for (size_t i = 0; i < (n+1); i++) {
+        graph[i] = (int*)malloc(edgeCounts[i] * sizeof(int));
 
-void runTestCaseFromFile(const char* filename, int setASize, int setBSize) {
+    }
+    int* currentIndices = (int*)calloc((n+1), sizeof(int));
+    
+    for (size_t i = 0; i < m; i++) {
+        if (e[i].u < n) {
+            graph[e[i].u][currentIndices[e[i].u]++] = e[i].v;
+        }
+        if (e[i].v < n) {
+            graph[e[i].v][currentIndices[e[i].v]++] = e[i].u;
+        }
+    }
+    free(currentIndices);
+    int* matchResult = (int*)malloc((n+1) * sizeof(int));
+
+    
+    memset(matchResult, -1, (n+1) * sizeof(int));
+   
+    size_t maxMatching = maximumBipartiteMatching(graph, n, edgeCounts, matchResult);
+
+    
+    return maxMatching;
+}
+
+/*
+void runTestCaseFromFile(const char* filename, size_t setASize, size_t setBSize) {
     FILE* file = fopen(filename, "r");
     if (!file) {
         perror("Error opening file");
         return;
     }
-
-    int** edgeLists = (int**)malloc(setASize * sizeof(int*));
-    int* edgeCounts = (int*)calloc(setASize, sizeof(int));
-
+    
+    size_t edgeCount = 0;
     int u, v;
     while (fscanf(file, "%d %d", &u, &v) == 2) {
-        if (u >= setASize || v >= setBSize) continue; 
-
-        edgeCounts[u]++;
-        edgeLists[u] = (int*)realloc(edgeLists[u], edgeCounts[u] * sizeof(int));
-        edgeLists[u][edgeCounts[u] - 1] = v;
+        if (u < setASize && v < setBSize) {
+            edgeCount++;
+        }
+    }
+    
+    rewind(file);
+    
+    xedge_t* edges = (xedge_t*)malloc(edgeCount * sizeof(xedge_t));
+    
+    size_t edgeIndex = 0;
+    while (fscanf(file, "%d %d", &u, &v) == 2) {
+        if (u < setASize && v < setBSize) {
+            edges[edgeIndex].u = u;
+            edges[edgeIndex].v = v;
+            edgeIndex++;
+        }
     }
     fclose(file);
-
-    int** graph = createGraphFromArrays(setASize, edgeLists, edgeCounts);
-
-
-    int* matching = (int*)malloc(setASize * sizeof(int));
-    memset(matching, -1, setASize * sizeof(int));
-    double start = omp_get_wtime();
-    int maxMatching = maximumBipartiteMatching(graph, setASize, edgeCounts, matching);
-    double end = omp_get_wtime();
-    double time_taken = end - start;
-    printf("Function took %f seconds to execute\n", time_taken);
-    printf("Matching size: %d\n", maxMatching);
-
+    int matchingSize = matching(setASize, edgeCount, edges);
+    printf("Matching size: %zu\n", matchingSize);
 
 }
-
-
 
 int main() {
-    runTestCaseFromFile("lastfm.txt", 2000000, 200000);
+    runTestCaseFromFile("mag_smaller.txt", 2000000, 200000);
     return 0;
-}
+}*/
