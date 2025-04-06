@@ -11,7 +11,7 @@ typedef struct {
     size_t        u;
     size_t        v;
 } xedge_t;
-/*
+
 int dfs_la_ts(int** graph, int* graphColSize,int graphSize,int* lookahead,int u,atomic_int* visited,int* pairA,int* pairB){
     int j = 0;
     //int j = lookahead[u];
@@ -70,109 +70,7 @@ int parallel_pothen_fan(int** graph, int graphSize, int* graphColSize, int* pair
     }
     return matchings;
 }
-*/
-int dfs_la_ts(int** graph, int* graphColSize, int graphSize, int* lookahead, 
-              int u, atomic_int* visited, int* pairA, int* pairB) {
-    // Skip processing if u is -1 (unmatched vertex in Y)
-    if (u == -1) return -1;
-    
-    // Lookahead step - start from lookahead position and try one round
-    int start = lookahead[u];
-    for (int i = 0; i < graphColSize[u]; i++) {
-        int idx = (start + i) % graphColSize[u];
-        int v = graph[u][idx];
-        
-        // Update lookahead for next time
-        lookahead[u] = (idx + 1) % graphColSize[u];
-        
-        // Found unmatched vertex in Y
-        if (pairB[v] == -1) {
-            // Atomically check if we're the first to visit
-            if (atomic_fetch_add(&visited[v], 1) == 0) {
-                return v;  // Found an augmenting path
-            }
-        }
-    }
-    
-    // Regular DFS step - try all neighbors
-    for (int i = 0; i < graphColSize[u]; i++) {
-        int v = graph[u][i];
-        
-        // Check if v is already matched to someone
-        if (pairB[v] != -1) {
-            // Atomically check if we're the first to visit
-            if (atomic_fetch_add(&visited[v], 1) == 0) {
-                // Continue DFS from the mate of v
-                int result = dfs_la_ts(graph, graphColSize, graphSize, lookahead, 
-                                    pairB[v], visited, pairA, pairB);
-                if (result != -1) {
-                    return result;
-                }
-            }
-        }
-    }
-    
-    return -1;  // No augmenting path found
-}
 
-int parallel_pothen_fan(int** graph, int graphSize, int* graphColSize, int* pairA, int* pairB) {
-    // Initialize matching structures
-    for (int i = 0; i < graphSize; i++) {
-        pairA[i] = -1;
-    }
-    
-    for (int i = 0; i < graphSize; i++) {
-        pairB[i] = -1;
-    }
-    
-    // Initialize lookahead array
-    int* lookahead = (int*)malloc(graphSize * sizeof(int));
-    for (int i = 0; i < graphSize; i++) {
-        lookahead[i] = 0;
-    }
-    
-    // Initialize atomic visited array
-    atomic_int* visited = (atomic_int*)malloc(graphSize * sizeof(atomic_int));
-    
-    int path_found = 1;
-    int matchings = 0;
-    int iteration = 0;
-    
-    // Main loop - continue until no more augmenting paths found
-    while (path_found) {
-        path_found = 0;
-        
-        // Reset visited array for this iteration
-        for (int i = 0; i < graphSize; i++) {
-            atomic_store(&visited[i], 0);
-        }
-        
-        // In a sequential version, we process one vertex at a time
-        // In parallel, you would distribute this loop across threads
-        for (int u = 0; u < graphSize; u++) {
-            // Only process unmatched vertices in X
-            if (pairA[u] == -1) {
-                int v = dfs_la_ts(graph, graphColSize, graphSize, lookahead, u, visited, pairA, pairB);
-                
-                if (v != -1) {
-                    // Augment the matching
-                    pairA[u] = v;
-                    pairB[v] = u;
-                    matchings++;
-                    path_found = 1;
-                }
-            }
-        }
-        
-        iteration++;
-    }
-    
-    // Free allocated memory
-    free(lookahead);
-    free(visited);
-    
-    return matchings;
-}
 
 void matchAndUpdate(int** graph, int* graphColSize, int* deg, int* pairA, int* pairB, bool* visited, int u, int* matchingSize) {
     if (visited[u]) return;
