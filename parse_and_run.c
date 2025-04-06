@@ -11,12 +11,12 @@ typedef struct {
 size_t matching(size_t n, size_t m, xedge_t e[]);
 
 int main() {
-    int u, v, capacityEdges = 100, m = 0;
+    size_t u, v, capacityEdges = 100, m = 0;
     xedge_t *edges = malloc(capacityEdges * sizeof(*edges));
 
-    int n = 0;
+    size_t n = 0;
 
-    while (scanf("%d %d", &u, &v) == 2) {
+    while (scanf("%zd %zd", &u, &v) == 2) {
         if (m == capacityEdges) {
             capacityEdges *= 2;
             edges = realloc(edges, capacityEdges * sizeof(*edges));
