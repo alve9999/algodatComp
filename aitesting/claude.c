@@ -5,12 +5,12 @@
 #include <limits.h>
 
 // Constants
-#define MAX_VERTICES 10000000  // Adjust as needed
 #define NIL 0
 #define INF INT_MAX
 
 // Graph representation
 typedef struct {
+    int n;
     int* edges;
     int* last;
     int* next;
@@ -19,28 +19,11 @@ typedef struct {
 } Graph;
 
 // Function prototypes
-void init_graph(Graph* graph, int max_edges);
 void add_edge(Graph* graph, int u, int v);
 void free_graph(Graph* graph);
 bool bfs(Graph* graph, int u_size, int v_size, int* pairU, int* pairV, int* dist);
 bool dfs(Graph* graph, int u, int* pairU, int* pairV, int* dist);
 int hopcroft_karp(Graph* graph, int u_size, int v_size);
-
-// Initialize graph
-void init_graph(Graph* graph, int max_edges) {
-    graph->max_edges = max_edges;
-    graph->edge_count = 0;
-    
-    // +1 to accommodate 1-indexed vertices
-    graph->edges = (int*)malloc((max_edges + 1) * sizeof(int));
-    graph->next = (int*)malloc((max_edges + 1) * sizeof(int));
-    graph->last = (int*)calloc(MAX_VERTICES + 1, sizeof(int));
-    
-    if (!graph->edges || !graph->next || !graph->last) {
-        fprintf(stderr, "Memory allocation failed\n");
-        exit(1);
-    }
-}
 
 // Add edge from u to v
 void add_edge(Graph* graph, int u, int v) {
@@ -48,7 +31,7 @@ void add_edge(Graph* graph, int u, int v) {
         fprintf(stderr, "Graph edge capacity exceeded\n");
         exit(1);
     }
-    
+
     graph->edge_count++;
     graph->edges[graph->edge_count] = v;
     graph->next[graph->edge_count] = graph->last[u];
@@ -64,9 +47,9 @@ void free_graph(Graph* graph) {
 
 // BFS to find augmenting paths
 bool bfs(Graph* graph, int u_size, int v_size, int* pairU, int* pairV, int* dist) {
-    int *queue = calloc(MAX_VERTICES + 1, sizeof(int));
+    int *queue = calloc(graph->n + 1, sizeof(int));
     int front = 0, rear = 0;
-    
+
     // Set distance to NIL for all vertices in U
     for (int u = 1; u <= u_size; u++) {
         if (pairU[u] == NIL) {
@@ -76,18 +59,18 @@ bool bfs(Graph* graph, int u_size, int v_size, int* pairU, int* pairV, int* dist
             dist[u] = INF;
         }
     }
-    
+
     dist[NIL] = INF;
-    
+
     // BFS
     while (front < rear) {
         int u = queue[front++];
-        
+
         if (dist[u] < dist[NIL]) {
             // Iterate through all adjacent vertices of u
             for (int e = graph->last[u]; e; e = graph->next[e]) {
                 int v = graph->edges[e];
-                
+
                 // If v is not matched or the distance to the matched vertex is not set
                 if (dist[pairV[v]] == INF) {
                     dist[pairV[v]] = dist[u] + 1;
@@ -96,7 +79,7 @@ bool bfs(Graph* graph, int u_size, int v_size, int* pairU, int* pairV, int* dist
             }
         }
     }
-    
+
     // Return true if we found an augmenting path to NIL
     return dist[NIL] != INF;
 }
@@ -106,11 +89,11 @@ bool dfs(Graph* graph, int u, int* pairU, int* pairV, int* dist) {
     if (u == NIL) {
         return true;
     }
-    
+
     // Try all adjacent vertices
     for (int e = graph->last[u]; e; e = graph->next[e]) {
         int v = graph->edges[e];
-        
+
         // Follow the distances in the shortest path
         if (dist[pairV[v]] == dist[u] + 1) {
             if (dfs(graph, pairV[v], pairU, pairV, dist)) {
@@ -120,7 +103,7 @@ bool dfs(Graph* graph, int u, int* pairU, int* pairV, int* dist) {
             }
         }
     }
-    
+
     // No augmenting path found through u
     dist[u] = INF;
     return false;
@@ -132,14 +115,14 @@ int hopcroft_karp(Graph* graph, int u_size, int v_size) {
     int* pairU = (int*)calloc(u_size + 1, sizeof(int));
     int* pairV = (int*)calloc(v_size + 1, sizeof(int));
     int* dist = (int*)malloc((u_size + 1) * sizeof(int));
-    
+
     if (!pairU || !pairV || !dist) {
         fprintf(stderr, "Memory allocation failed\n");
         exit(1);
     }
-    
+
     int max_matching = 0;
-    
+
     // Main algorithm loop
     while (bfs(graph, u_size, v_size, pairU, pairV, dist)) {
         // Try to find augmenting paths for all free vertices in U
@@ -149,45 +132,44 @@ int hopcroft_karp(Graph* graph, int u_size, int v_size) {
             }
         }
     }
-    
+
     // Free allocated memory
     free(pairU);
     free(pairV);
     free(dist);
-    
+
     return max_matching;
 }
 
-int main() {
-    // Buffer for reading lines
-    char line[100];
-    int max_edges = 1000000000;  // Initial estimate
-    
-    Graph graph;
-    init_graph(&graph, max_edges);
-    
-    int max_u = 0, max_v = 0;
-    int u, v;
-    
-    // Read edges from stdin
-    while (fgets(line, sizeof(line), stdin) != NULL) {
-        if (sscanf(line, "%d %d", &u, &v) == 2) {
-            add_edge(&graph, u, v);
-            
-            // Track the max vertex indices for U and V
-            if (u > max_u) max_u = u;
-            if (v > max_v) max_v = v;
+
+typedef struct {
+    size_t        u;    /* odd.        */
+    size_t        v;    /* even.    */
+} xedge_t;
+
+
+size_t matching(size_t n, size_t m, xedge_t e[]) {
+    Graph graph1;
+    graph1.n = n;
+    {
+        Graph *graph = &graph1;
+        graph->max_edges = m;
+        graph->edge_count = 0;
+
+        // +1 to accommodate 1-indexed vertices
+        graph->edges = (int*)malloc((m + 1) * sizeof(int));
+        graph->next = (int*)malloc((m + 1) * sizeof(int));
+        graph->last = (int*)calloc(n + 1, sizeof(int));
+
+        if (!graph->edges || !graph->next || !graph->last) {
+            fprintf(stderr, "Memory allocation failed\n");
+            exit(1);
         }
     }
-    
-    // Find maximum matching
-    int result = hopcroft_karp(&graph, max_u, max_v);
-    
-    // Output the result
-    printf("%d\n", result);
-    
-    // Clean up
-    free_graph(&graph);
-    
-    return 0;
+    for (int i = 0; i < m; ++i) {
+        xedge_t *ed = &e[i];
+        add_edge(&graph1, ed->u, ed->v);
+    }
+    int result = hopcroft_karp(&graph1, n, n);
+    return result;
 }
