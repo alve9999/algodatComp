@@ -206,8 +206,8 @@ int maximumBipartiteMatching(int** graph, int graphSize, int* graphColSize, int*
 
     // Now, call hopcroftKarp
     start_time = clock();
-    //int main_matchings = parallelHopcroftKarp(graph, graphSize, graphColSize,pairA, pairB);
-    int main_matchings = hopcroftKarp(graph, graphSize, graphColSize, pairA, pairB);
+    int main_matchings = parallel_pothen_fan(graph, graphSize, graphColSize,pairA, pairB);
+    //int main_matchings = hopcroftKarp(graph, graphSize, graphColSize, pairA, pairB);
 
     // Stop the timer after hopcroftKarp
     clock_t end_time_2 = clock();
