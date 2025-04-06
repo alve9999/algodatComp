@@ -21,8 +21,8 @@ int main() {
             capacityEdges *= 2;
             edges = realloc(edges, capacityEdges * sizeof(*edges));
         }
-        u += 1; // just increase both by 1, to allow 0 as sentinel, cuz Skeppstedts input is like that. Does NOT hurt anything
-        v += 1;
+        //u += 1; // just increase both by 1, to allow 0 as sentinel, cuz Skeppstedts input is like that. Does NOT hurt anything
+        //v += 1;
 
         edges[m].u = u;
         edges[m].v = v;
