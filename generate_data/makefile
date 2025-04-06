@@ -1,11 +1,12 @@
 
 all:
 	mkdir -p ../data
-	@echo "generating data 10k"
-	cargo r -r -- 10000 > 10k.txt
-	@echo "generating data 1M"
-	cargo r -r -- 1000000 > 1M.txt
-	@echo "generating data 10M"
-	cargo r -r -- 10000000 > 10M.txt
-	cp *.txt ../data
+	@echo " ::: Generating 1M files :::"
+	@for i in A B C ; do \
+		name=$${i}_1M.txt ; \
+		echo "generating $$name" ; \
+		cargo r -r -- 1000000 > $$name ; \
+		echo "copying $$name to ../data" ; \
+		cp $$name ../data ; \
+	done
 	@echo "Done!"
