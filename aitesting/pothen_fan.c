@@ -6,67 +6,111 @@
 #include <limits.h>
 #include <time.h>
 #include <stdatomic.h>
+#include <assert.h>
 
 typedef struct {
     size_t        u;
     size_t        v;
 } xedge_t;
 
-int dfs_la_ts(int** graph, int* graphColSize,int graphSize,int* lookahead,int u,atomic_int* visited,int* pairA,int* pairB){
+typedef struct {
+    int u;
+    int i;
+} u_i_t;
+
+// uses two stacks, node u, and it's i'eth edge
+bool dfs_la_ts(int** graph, int* graphColSize,int graphSize,int* lookahead,int start, atomic_int* visited,int* pairA,int* pairB, u_i_t *stack, bool order){
+    int stack_at = 0;
+    int u = start;
+    WORK_ON_NEW_U:;
+    int i = order ? 0 : (graphColSize[u] - 1);
+    // take from stack
+    assert(u != 0); // should not be 0
+
     // TODO: do lookahead thing if we use stack-mechanism instead of recursive.
-    if (u == 0) return 0;
-    for (int i = 0; i < graphColSize[u]; i++) {
-        int v = graph[u][i];
-        if(pairB[v] == 0){
+    for (int j = lookahead[u]; j < graphColSize[u]; j++) {
+        int v = graph[u][j];
+        if(pairB[v] == 0){ // unmatched v. Can match them together
             if (atomic_fetch_add(&visited[v], 1) == 0) {
+                lookahead[u] = j+1;
                 // found unmatched v, that wasn't visited. Let's match with this one.
                 pairA[u] = v;
                 pairB[v] = u;
-                return v;
+
+                // go backwards through stack and match things
+                while (stack_at > 0) {
+                    stack_at--;
+                    u = stack[stack_at].u;
+                    assert(u != 0);
+                    i = stack[stack_at].i;
+                    const int v = graph[u][i];
+                    pairA[u] = v;
+                    pairB[v] = u;
+                }
+                return 1;
             }
         }
     }
-
-    for (int i = 0; i < graphColSize[u]; i++) { // TODO: fariness
+    lookahead[u] = graphColSize[u]; // stop looking up things in future from this node
+    CONTINUE_ON_SECOND_LOOP:;
+    for (; order ? (i < graphColSize[u]) : (i >= 0); order ? i++ : i--) { // TODO: fariness
         int v = graph[u][i];
         if(atomic_fetch_add(&visited[v],1) == 0){
-            int index = dfs_la_ts(graph,graphColSize,graphSize,lookahead,pairB[v],visited,pairA,pairB);
-            if(index != 0){
-                // have u, connected to v, which is matched already!
-                // but we found a better alternative.
-                pairA[u] = v;
-                pairB[v] = u;
-                return index;
-            }
+            // don't do recursion, instead, push current state on stack, and continue on pairB[v] ()
+            int new_u = pairB[v];
+            assert(new_u != 0); // v should be matched, because we already did lookahead before this.
+            // push (u, v), work then on new_u
+            assert(u != 0);
+            stack[stack_at].u = u; stack[stack_at].i = i; stack_at++;
+            u = new_u;
+            goto WORK_ON_NEW_U;
         }
     }
-    return 0;
+    // we found no continuation from here. Continue from the previous u, at the i it was at in the second loop
+    if (stack_at == 0) {
+        return 0;
+    } // nothing left
+    stack_at--;
+    u = stack[stack_at].u;
+    i = stack[stack_at].i + (order ? (1) : -1); // after ourselves
+    goto CONTINUE_ON_SECOND_LOOP;
 }
 
 
 int parallel_pothen_fan(int** graph, int graphSize, int* graphColSize, int* pairA, int* pairB){
-    int* lookahead = (int*)malloc(graphSize * sizeof(int));
-    for (int i = 0; i < graphSize; i++) {
-        lookahead[i] = 0;
-    }
-    atomic_int path_found = 1;
-    atomic_int matchings = 0;
+    int* lookahead = (int*)calloc(graphSize, sizeof(int));
+
+    // allocate stacks
+    int max_threads = 8;
+    omp_set_num_threads(max_threads);
+    u_i_t *stacks = calloc(graphSize * max_threads, sizeof(*stacks));
+
+    int path_found = 1;
+    long matchings = 0;
+    bool order = false;
+    // FOR V NODES
     atomic_int* visited = calloc(graphSize, sizeof(atomic_int));
     while(path_found){
-        for(int i = 2; i < graphSize; i+=2) {
-            atomic_store(&visited[i], 0);
-        }
+        memset(visited, 0, sizeof(*visited)*graphSize);
         path_found = 0;
-        #pragma omp parallel for
+        order = !order;
+        #pragma omp parallel for reduction(+:matchings)
         for(int i = 1; i < graphSize; i+=2){ // UNMATCHED u VERTICES
-            if (pairA[i] != 0 || visited[i]) continue;
-            int v = dfs_la_ts(graph,graphColSize,graphSize,lookahead,i,visited,pairA,pairB);
-            if(v != 0){
-                atomic_store(&path_found, 1);
-                atomic_fetch_add(&matchings,1);
+            // SAFETY: this read is okay. Because no unmatched u's will be visited from searches starting on other unmatches u's. only matched u's will be found.
+            if (pairA[i] != 0) continue;
+            int t_id = omp_get_thread_num();
+            // printf("%d\n", t_id);
+            u_i_t *stack = &stacks[graphSize * t_id];
+            int res = dfs_la_ts(graph,graphColSize,graphSize,lookahead,i,visited,pairA,pairB, stack, order);
+            if(res != 0){
+                path_found = 1;
+                matchings++;
             }
         }
     }
+    free(lookahead);
+    free(visited);
+    free(stacks);
     return matchings;
 }
 
