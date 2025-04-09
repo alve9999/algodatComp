@@ -41,13 +41,12 @@ static inline bool dfs_la_ts(int** graph, int* graphColSize,int graphSize,int* l
                 while (stack_at > 0) {
                     stack_at--;
                     u = stack[stack_at].u;
-                    assert(u != 0);
                     i = stack[stack_at].i;
-                    const int v = graph[u][i];
+                    int v = graph[u][i];
+                    assert(u != 0);
                     // pairA[u] = v; // not necessary, already matched to something, won't be checked
                     pair[v] = u;
                 }
-                pair[u] = 1; // set to 1, don't care who it's matching to
                 return 1;
             }
         }
@@ -111,6 +110,7 @@ static int parallel_pothen_fan(int** graph, int graphSize, int* graphColSize, in
                 res = dfs_la_ts(graph,graphColSize,graphSize,lookahead,i,visited,pair, stack, false);
             }
             if(res != 0){
+                pair[i] = 1;
                 path_found = 1;
                 matchings++;
             }
