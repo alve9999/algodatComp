@@ -78,18 +78,26 @@ static inline bool dfs_la_ts(int** graph, int* graphColSize,int graphSize,int* l
 
 
 static int parallel_pothen_fan(int** graph, int graphSize, int* graphColSize, int* pair){
-    int* lookahead = (int*)calloc(graphSize, sizeof(int));
+    static bool inited = false;
+    static int* lookahead;
+    static u_i_t *stacks;
+    static atomic_int* visited;
+    const int max_threads = 32;
+    if (!inited) {
+        inited = true;
+        lookahead = (int*)calloc(graphSize, sizeof(int));
+        stacks = calloc(graphSize * max_threads, sizeof(*stacks));
+        visited = calloc(graphSize, sizeof(atomic_int));
+    }
+    memset(lookahead, 0, graphSize*sizeof(*lookahead));
 
     // allocate stacks
-    int max_threads = 32;
     omp_set_num_threads(max_threads);
-    u_i_t *stacks = calloc(graphSize * max_threads, sizeof(*stacks));
 
     int path_found = 1;
     long matchings = 0;
     bool order = false;
     // FOR V NODES
-    atomic_int* visited = calloc(graphSize, sizeof(atomic_int));
     while(path_found){
         memset(visited, 0, sizeof(*visited)*graphSize);
         path_found = 0;
@@ -116,9 +124,9 @@ static int parallel_pothen_fan(int** graph, int graphSize, int* graphColSize, in
             }
         }
     }
-    free(lookahead);
-    free(visited);
-    free(stacks);
+    // free(lookahead);
+    // free(visited);
+    // free(stacks);
     return matchings;
 }
 
@@ -144,7 +152,6 @@ static void matchAndUpdate(int** graph, int* graphColSize, int* deg, int* pair, 
         }
     }
 }
-
 
 static int karpSipser(int** graph, int graphSize, int* graphColSize, int* pair){
     int* deg = (int*)malloc(graphSize * sizeof(int));
@@ -173,7 +180,11 @@ static int karpSipser(int** graph, int graphSize, int* graphColSize, int* pair){
 
 static int maximumBipartiteMatching(int** graph, int graphSize, int* graphColSize) {
     graphSize++;
-    int* pair = (int*)malloc((graphSize) * sizeof(int));
+    static bool inited = false;
+    static int *pair;
+    if (!inited) {
+        pair = (int*)malloc((graphSize) * sizeof(int));
+    }
     memset(pair, 0, (graphSize) * sizeof(int));
 
     clock_t start_time = clock();
@@ -198,51 +209,27 @@ static int maximumBipartiteMatching(int** graph, int graphSize, int* graphColSiz
     return init_matchings + main_matchings;
 }
 
-static int** createGraphFromArrays(size_t n, size_t m, xedge_t e[]) {
-    int* edgeCounts = (int*)calloc(n, sizeof(int));
-
-
-    for (size_t i = 0; i < m; i++) {
-        if (e[i].u < n) edgeCounts[e[i].u]++;
-        if (e[i].v < n) edgeCounts[e[i].v]++;
-    }
-
-
-    int** graph = (int**)malloc(n * sizeof(int*));
-    for (size_t i = 0; i < n; i++) {
-        graph[i] = (int*)malloc(edgeCounts[i] * sizeof(int));
-    }
-
-    int* currentIndex = (int*)calloc(n, sizeof(int));
-
-
-    for (size_t i = 0; i < m; i++) {
-        if (e[i].u < n)
-            graph[e[i].u][currentIndex[e[i].u]++] = e[i].v;
-        if (e[i].v < n)
-            graph[e[i].v][currentIndex[e[i].v]++] = e[i].u;
-    }
-
-
-    free(edgeCounts);
-    free(currentIndex);
-
-    return graph;
-}
-
 size_t matching(size_t n, size_t m, xedge_t e[]) {
-    int* edgeCounts = (int*)calloc(n, sizeof(int));
+    static bool inited = false;
+    static int* edgeCounts;
+    static int** graph;
+    static int* currentIndices;
+    if (!inited) {
+        inited = true;
+        edgeCounts = (int*)calloc(n+1, sizeof(int));
+        graph = (int**)calloc((n+1), sizeof(int*));
+        currentIndices = (int*)calloc((n+1), sizeof(int));
+    }
+    memset(edgeCounts, 0, (n+1) * sizeof(*edgeCounts));
+    memset(currentIndices, 0, (n+1) * sizeof(*currentIndices));
     for (size_t i = 0; i < m; i++) {
         edgeCounts[e[i].u]++;
         edgeCounts[e[i].v]++;
     }
-    int** graph = (int**)malloc((n+1) * sizeof(int*));
 
     for (size_t i = 0; i < (n+1); i++) {
-        graph[i] = (int*)malloc(edgeCounts[i] * sizeof(int));
-
+        graph[i] = (int*)realloc(graph[i],edgeCounts[i] * sizeof(int));
     }
-    int* currentIndices = (int*)calloc((n+1), sizeof(int));
 
     for (size_t i = 0; i < m; i++) {
         if (e[i].u < n) {
@@ -252,8 +239,6 @@ size_t matching(size_t n, size_t m, xedge_t e[]) {
             graph[e[i].v][currentIndices[e[i].v]++] = e[i].u;
         }
     }
-    free(currentIndices);
-
     size_t maxMatching = maximumBipartiteMatching(graph, n, edgeCounts);
 
     return maxMatching;
