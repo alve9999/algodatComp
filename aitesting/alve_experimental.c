@@ -19,7 +19,7 @@ typedef struct {
 } u_i_t;
 
 // uses two stacks, node u, and it's i'eth edge
-static inline bool dfs_la_ts(int* graph, int* graphOffset,int graphSize,int* lookahead,int start, atomic_int* visited,int* pair, u_i_t *stack, bool order){
+static inline bool dfs_la_ts(int* graph, int* graphOffset,int graphSize,int* lookahead,int start, atomic_int* visited,int* v_pair, u_i_t *stack, bool order){
     int stack_at = 0;
     int u = start;
     WORK_ON_NEW_U:;
@@ -29,12 +29,12 @@ static inline bool dfs_la_ts(int* graph, int* graphOffset,int graphSize,int* loo
     // TODO: do lookahead thing if we use stack-mechanism instead of recursive.
     for (int j = lookahead[u]; j < graphOffset[u+1]; j++) {
         int v = graph[j];
-        if(pair[v] == 0){ // unmatched v. Can match them together
+        if(v_pair[v] == 0){ // unmatched v. Can match them together
             if (atomic_fetch_add(&visited[v], 1) == 0) {
                 lookahead[u] = j+1;
                 // found unmatched v, that wasn't visited. Let's match with this one.
                 // pairA[u] = v; // Not needed!
-                pair[v] = u;
+                v_pair[v] = u;
 
                 // go backwards through stack and match things
                 while (stack_at > 0) {
@@ -44,7 +44,7 @@ static inline bool dfs_la_ts(int* graph, int* graphOffset,int graphSize,int* loo
                     int v = graph[i];
                     assert(u != 0);
                     // pairA[u] = v; // not necessary, already matched to something, won't be checked
-                    pair[v] = u;
+                    v_pair[v] = u;
                 }
                 return 1;
             }
@@ -56,7 +56,7 @@ static inline bool dfs_la_ts(int* graph, int* graphOffset,int graphSize,int* loo
         int v = graph[i];
         if(atomic_fetch_add(&visited[v],1) == 0){
             // don't do recursion, instead, push current state on stack, and continue on pairB[v] ()
-            int new_u = pair[v];
+            int new_u = v_pair[v];
             assert(new_u != 0); // v should be matched, because we already did lookahead before this.
             // push (u, v), work then on new_u
             assert(u != 0);
@@ -75,12 +75,12 @@ static inline bool dfs_la_ts(int* graph, int* graphOffset,int graphSize,int* loo
     goto CONTINUE_ON_SECOND_LOOP;
 }
 
-static int parallel_pothen_fan(int* graph, int graphSize, int* graphOffset, int* pair){
+static int parallel_pothen_fan(int* graph, int graphSize, int* graphOffset, int* v_pair, bool *u_matched){
     static bool inited = false;
     static int* lookahead;
     static u_i_t *stacks;
     static atomic_int* visited;
-    const int max_threads = 64;
+    const int max_threads = 32;
     if (!inited) {
         inited = true;
         lookahead = (int*)calloc(graphSize, sizeof(int));
@@ -103,28 +103,22 @@ static int parallel_pothen_fan(int* graph, int graphSize, int* graphOffset, int*
         int worklist_size = 0;
         static int* worklist;
         if (!worklist) worklist = malloc(graphSize * sizeof(int));
-        for (int i = 1; i < graphSize; i += 2)
-            if (pair[i] == 0)
-                worklist[worklist_size++] = i;
+        for (int i = 0; i < (graphSize >> 1); ++i)
+            if (!u_matched[i])
+                worklist[worklist_size++] = 1 + (i << 1);
 
         #pragma omp parallel for reduction(+:matchings)
         for(int idx = 0; idx < worklist_size; idx+=1){ // UNMATCHED u VERTICES
             int i = worklist[idx];
             // SAFETY: this read is okay. Because no unmatched u's will be visited from searches starting on other unmatches u's. only matched u's will be found.
-            if (pair[i] != 0) continue;
             int t_id = omp_get_thread_num();
-            // printf("%d\n", t_id);
             u_i_t *stack = &stacks[graphSize * t_id];
             // these are inlined, so get two monomorphised versions
             int res;
-            if (order) {
-                res = dfs_la_ts(graph,graphOffset,graphSize,lookahead,i,visited,pair, stack, true);
-            }
-            else {
-                res = dfs_la_ts(graph,graphOffset,graphSize,lookahead,i,visited,pair, stack, false);
-            }
-            if(res != 0){
-                pair[i] = 1;
+            if (order) res = dfs_la_ts(graph,graphOffset,graphSize,lookahead,i,visited,v_pair,  stack, true);
+            else       res = dfs_la_ts(graph,graphOffset,graphSize,lookahead,i,visited,v_pair,  stack, false);
+            if(res != 0) {
+                u_matched[i >> 1] = 1;
                 path_found = 1;
                 matchings++;
             }
@@ -189,11 +183,14 @@ static int karpSipser(int* graph, int graphSize, int* graphOffset, int* pair){
 static int maximumBipartiteMatching(int* graph, int graphSize, int* graphOffset) {
     graphSize++;
     static bool inited = false;
-    static int *pair;
+    static int *v_pair;
+    static bool *u_matched;
     if (!inited) {
-        pair = (int*)malloc((graphSize) * sizeof(int));
+        v_pair = malloc((graphSize) * sizeof(*v_pair));
+        u_matched = malloc((graphSize) * sizeof(*u_matched));
     }
-    memset(pair, 0, (graphSize) * sizeof(int));
+    memset(v_pair, 0, (graphSize) * sizeof(*v_pair));
+    memset(u_matched, 0, (graphSize) * sizeof(*u_matched));
 
     clock_t start_time = clock();
     int init_matchings = 0;
@@ -205,7 +202,7 @@ static int maximumBipartiteMatching(int* graph, int graphSize, int* graphOffset)
 
     // Now, call hopcroftKarp
     start_time = clock();
-    int main_matchings = parallel_pothen_fan(graph, graphSize, graphOffset,pair);
+    int main_matchings = parallel_pothen_fan(graph, graphSize, graphOffset,v_pair, u_matched);
     //int main_matchings = hopcroftKarp(graph, graphSize, graphColSize, pairA, pairB);
 
     // Stop the timer after hopcroftKarp
