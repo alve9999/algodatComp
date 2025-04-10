@@ -107,7 +107,7 @@ static int parallel_pothen_fan(int* graph, int graphSize, int* graphOffset, int*
             if (!u_matched[i])
                 worklist[worklist_size++] = 1 + (i << 1);
 
-        #pragma omp parallel for reduction(+:matchings)
+        #pragma omp parallel for schedule(guided) reduction(+:matchings)
         for(int idx = 0; idx < worklist_size; idx+=1){ // UNMATCHED u VERTICES
             int i = worklist[idx];
             // SAFETY: this read is okay. Because no unmatched u's will be visited from searches starting on other unmatches u's. only matched u's will be found.
