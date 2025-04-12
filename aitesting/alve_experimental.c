@@ -18,8 +18,14 @@ typedef struct {
     int i;
 } u_i_t;
 
+typedef struct {
+    union {
+        atomic_bool b;
+    };
+} visit_t;
+
 // uses two stacks, node u, and it's i'eth edge
-static inline bool dfs_la_ts(int* graph, int* graphOffset,int graphSize,int* lookahead,int start, atomic_int* visited,int* v_pair, u_i_t *stack, bool order){
+static inline bool dfs_la_ts(int* graph, int* graphOffset,int graphSize,int* lookahead,int start, visit_t* visited,int* v_pair, u_i_t *stack, bool order){
     int stack_at = 0;
     int u = start;
     WORK_ON_NEW_U:;
@@ -30,23 +36,25 @@ static inline bool dfs_la_ts(int* graph, int* graphOffset,int graphSize,int* loo
     for (int j = lookahead[u]; j < graphOffset[u+1]; j++) {
         int v = graph[j];
         if(v_pair[v] == 0){ // unmatched v. Can match them together
-            if (atomic_fetch_add(&visited[v], 1) == 0) {
-                lookahead[u] = j+1;
-                // found unmatched v, that wasn't visited. Let's match with this one.
-                // pairA[u] = v; // Not needed!
-                v_pair[v] = u;
-
-                // go backwards through stack and match things
-                while (stack_at > 0) {
-                    stack_at--;
-                    u = stack[stack_at].u;
-                    i = stack[stack_at].i;
-                    int v = graph[i];
-                    assert(u != 0);
-                    // pairA[u] = v; // not necessary, already matched to something, won't be checked
+            if (!atomic_load_explicit(&visited[v].b, memory_order_relaxed)) {
+                if (atomic_exchange_explicit(&visited[v].b,true, memory_order_relaxed) == 0){
+                    lookahead[u] = j+1;
+                    // found unmatched v, that wasn't visited. Let's match with this one.
+                    // pairA[u] = v; // Not needed!
                     v_pair[v] = u;
+
+                    // go backwards through stack and match things
+                    while (stack_at > 0) {
+                        stack_at--;
+                        u = stack[stack_at].u;
+                        i = stack[stack_at].i;
+                        int v = graph[i];
+                        assert(u != 0);
+                        // pairA[u] = v; // not necessary, already matched to something, won't be checked
+                        v_pair[v] = u;
+                    }
+                    return 1;
                 }
-                return 1;
             }
         }
     }
@@ -54,15 +62,18 @@ static inline bool dfs_la_ts(int* graph, int* graphOffset,int graphSize,int* loo
     CONTINUE_ON_SECOND_LOOP:;
     for (; order ? (i < graphOffset[u+1]) : (i >= graphOffset[u]); order ? i++ : i--) { // TODO: fariness
         int v = graph[i];
-        if(atomic_fetch_add(&visited[v],1) == 0){
-            // don't do recursion, instead, push current state on stack, and continue on pairB[v] ()
-            int new_u = v_pair[v];
-            assert(new_u != 0); // v should be matched, because we already did lookahead before this.
-            // push (u, v), work then on new_u
-            assert(u != 0);
-            stack[stack_at].u = u; stack[stack_at].i = i; stack_at++;
-            u = new_u;
-            goto WORK_ON_NEW_U;
+        if (!atomic_load_explicit(&visited[v].b, memory_order_relaxed)) {
+            if (atomic_exchange_explicit(&visited[v].b,true, memory_order_relaxed) == 0){
+                // don't do recursion, instead, push current state on stack, and continue on pairB[v] ()
+                int new_u = v_pair[v];
+                assert(new_u != 0); // v should be matched, because we already did lookahead before this.
+                // push (u, v), work then on new_u
+                assert(u != 0);
+                stack[stack_at].u = u; stack[stack_at].i = i; stack_at++;
+
+                u = new_u;
+                goto WORK_ON_NEW_U;
+            }
         }
     }
     // we found no continuation from here. Continue from the previous u, at the i it was at in the second loop
@@ -79,13 +90,13 @@ static int parallel_pothen_fan(int* graph, int graphSize, int* graphOffset, int*
     static bool inited = false;
     static int* lookahead;
     static u_i_t *stacks;
-    static atomic_int* visited;
+    static visit_t* visited;
     const int max_threads = 32;
     if (!inited) {
         inited = true;
         lookahead = (int*)calloc(graphSize, sizeof(int));
         stacks = calloc(graphSize * max_threads, sizeof(*stacks));
-        visited = calloc(graphSize, sizeof(atomic_int));
+        visited = calloc(graphSize, sizeof(*visited));
     }
     memcpy(lookahead, graphOffset, (size_t)graphSize * sizeof(*lookahead)); // Copy graphOffset to lookahead
 
@@ -102,12 +113,15 @@ static int parallel_pothen_fan(int* graph, int graphSize, int* graphOffset, int*
         order = !order;
         int worklist_size = 0;
         static int* worklist;
+        static int* local_matchings;;
         if (!worklist) worklist = malloc(graphSize * sizeof(int));
-        for (int i = 0; i < (graphSize >> 1); ++i)
-            if (!u_matched[i])
+        for (int i = 0; i < (graphSize >> 1); ++i) {
+            if (!u_matched[i]) {
                 worklist[worklist_size++] = 1 + (i << 1);
+            }
+        }
 
-        #pragma omp parallel for schedule(guided) reduction(+:matchings)
+        #pragma omp parallel for schedule(guided) reduction(+:matchings) 
         for(int idx = 0; idx < worklist_size; idx+=1){ // UNMATCHED u VERTICES
             int i = worklist[idx];
             // SAFETY: this read is okay. Because no unmatched u's will be visited from searches starting on other unmatches u's. only matched u's will be found.
