@@ -25,23 +25,22 @@ typedef struct {
 } visit_t;
 
 // uses two stacks, node u, and it's i'eth edge
-static inline bool dfs_la_ts(int* graph, int* graphOffset,int graphSize,int* lookahead,int start, visit_t* visited,int* v_pair, u_i_t *stack, bool order){
+static inline bool dfs_la_ts(int* graph, int* graphOffset,int graphSize,int start, visit_t* visited,int* v_pair, u_i_t *stack, bool order){
     int stack_at = 0;
     int u = start;
     WORK_ON_NEW_U:;
     int i = order ? graphOffset[u] : (graphOffset[u+1] - 1);
     // take from stack
     assert(u != 0); // should not be 0
-    // TODO: do lookahead thing if we use stack-mechanism instead of recursive.
-    for (int j = lookahead[u]; j < graphOffset[u+1]; j++) {
+    for (int j = graphOffset[u]; j < graphOffset[u+1]; j++) {
         int v = graph[j];
         if(v_pair[v] == 0){ // unmatched v. Can match them together
             if (!atomic_load_explicit(&visited[v].b, memory_order_relaxed)) {
                 if (atomic_exchange_explicit(&visited[v].b,true, memory_order_relaxed) == 0){
-                    lookahead[u] = j+1;
                     // found unmatched v, that wasn't visited. Let's match with this one.
                     // pairA[u] = v; // Not needed!
                     v_pair[v] = u;
+                    //printf("%d\n", stack_at);
 
                     // go backwards through stack and match things
                     while (stack_at > 0) {
@@ -58,9 +57,8 @@ static inline bool dfs_la_ts(int* graph, int* graphOffset,int graphSize,int* loo
             }
         }
     }
-    lookahead[u] = graphOffset[u+1]; // stop looking up things in future from this node
     CONTINUE_ON_SECOND_LOOP:;
-    for (; order ? (i < graphOffset[u+1]) : (i >= graphOffset[u]); order ? i++ : i--) { // TODO: fariness
+    for (; order ? (i < graphOffset[u+1]) : (i >= graphOffset[u]); order ? i++ : i--) {
         int v = graph[i];
         if (!atomic_load_explicit(&visited[v].b, memory_order_relaxed)) {
             if (atomic_exchange_explicit(&visited[v].b,true, memory_order_relaxed) == 0){
@@ -88,17 +86,14 @@ static inline bool dfs_la_ts(int* graph, int* graphOffset,int graphSize,int* loo
 
 static int parallel_pothen_fan(int* graph, int graphSize, int* graphOffset, int* v_pair, bool *u_matched){
     static bool inited = false;
-    static int* lookahead;
     static u_i_t *stacks;
     static visit_t* visited;
     const int max_threads = 32;
     if (!inited) {
         inited = true;
-        lookahead = (int*)calloc(graphSize, sizeof(int));
         stacks = calloc(graphSize * max_threads, sizeof(*stacks));
         visited = calloc(graphSize, sizeof(*visited));
     }
-    memcpy(lookahead, graphOffset, (size_t)graphSize * sizeof(*lookahead)); // Copy graphOffset to lookahead
 
     // allocate stacks
     omp_set_num_threads(max_threads);
@@ -121,7 +116,7 @@ static int parallel_pothen_fan(int* graph, int graphSize, int* graphOffset, int*
             }
         }
 
-        #pragma omp parallel for schedule(guided) reduction(+:matchings) 
+        #pragma omp parallel for schedule(guided) reduction(+:matchings)
         for(int idx = 0; idx < worklist_size; idx+=1){ // UNMATCHED u VERTICES
             int i = worklist[idx];
             // SAFETY: this read is okay. Because no unmatched u's will be visited from searches starting on other unmatches u's. only matched u's will be found.
@@ -129,8 +124,8 @@ static int parallel_pothen_fan(int* graph, int graphSize, int* graphOffset, int*
             u_i_t *stack = &stacks[graphSize * t_id];
             // these are inlined, so get two monomorphised versions
             int res;
-            if (order) res = dfs_la_ts(graph,graphOffset,graphSize,lookahead,i,visited,v_pair,  stack, true);
-            else       res = dfs_la_ts(graph,graphOffset,graphSize,lookahead,i,visited,v_pair,  stack, false);
+            if (order) res = dfs_la_ts(graph,graphOffset,graphSize,i,visited,v_pair,  stack, true);
+            else       res = dfs_la_ts(graph,graphOffset,graphSize,i,visited,v_pair,  stack, false);
             if(res != 0) {
                 u_matched[i >> 1] = 1;
                 path_found = 1;
@@ -138,9 +133,6 @@ static int parallel_pothen_fan(int* graph, int graphSize, int* graphOffset, int*
             }
         }
     }
-    // free(lookahead);
-    // free(visited);
-    // free(stacks);
     return matchings;
 }
 
