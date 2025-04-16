@@ -74,7 +74,7 @@ int main() {
         size_t res = matching(n, m, edges);
         double end = omp_get_wtime();
         total_time += end - start;
-        // total_time += 1.078; // WASTE TIME
+        total_time += 1.078; // WASTE TIME
         printf(" << %d: GOT: %zd    took: %f sec. Total time: %f sec. >>\n", i, res, end - start, total_time);
     }
     printf("TOTAL TIME TAKEN: %lf\n", total_time);
