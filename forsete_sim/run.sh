@@ -19,7 +19,8 @@ OUT_FILE="${SRC_FILE}.out"
 
 # Compile the C file
 echo " >> Compiling $OUT_FILE"
-gcc parse_and_run_multiple.c "$SRC_FILE" -o "$OUT_FILE" -O3 -g -fopenmp -Wall
+gcc "$SRC_FILE" -c -o "tmp.o" -O3 -g -fopenmp -Wall
+g++ tmp.o parse_and_run_multiple.cpp -o "$OUT_FILE" -fopenmp -g -O3 -Wall
 
 # Check if compilation was successful
 if [ $? -ne 0 ]; then
