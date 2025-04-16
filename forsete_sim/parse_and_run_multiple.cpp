@@ -64,7 +64,7 @@ int main() {
     int i = 1;
     for (; ; ++i) {
         if (total_time >= 120) {
-            printf(" >> TIME OVER! 120 s HAS PASSED! YOU CLEARED %d GRAPHS\n", i-1);
+            printf(" >> TIME OVER! 120 s HAS PASSED! YOU CLEARED %d GRAPHS\n", i-2);
             break;
         }
 
@@ -74,7 +74,7 @@ int main() {
         size_t res = matching(n, m, edges);
         double end = omp_get_wtime();
         total_time += end - start;
-        total_time += 1.078; // WASTE TIME
+        total_time += 0.78; // WASTE TIME
         printf(" << %d: GOT: %zd    took: %f sec. Total time: %f sec. >>\n", i, res, end - start, total_time);
     }
     printf("TOTAL TIME TAKEN: %lf\n", total_time);
