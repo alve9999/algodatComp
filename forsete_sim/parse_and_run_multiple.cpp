@@ -38,18 +38,24 @@ struct xedge_hash {
     }
 };
 
+#include <vector>
+
 // create graph from 1..1M  where odd are u and even are v.
 static void create_graph(xedge_t *edges, int n, int m) {
-    std::unordered_set<xedge_t, xedge_hash> set;
+
+    size_t total_pairs = 500000UL * 500000UL;
+    std::vector<bool> vec(total_pairs, false);
 
     int pre_m = 0;
     while (pre_m < m) {
         size_t u = (generate_random() % (n/2)) * 2 + 1;
         size_t v = ((generate_random() % (n/2)) + 1) * 2;
         xedge_t e = {u, v};
-        // auto [iter, inserted] = set.insert(e);
-        // if (!inserted) continue;
-        edges[pre_m++] = e;
+        size_t index = ((u -1) / 2) * 500000UL + (v-2)/2;
+        if (!vec.at(index)) {
+            vec[index] = true;
+            edges[pre_m++] = e;
+        }
     }
 }
 
