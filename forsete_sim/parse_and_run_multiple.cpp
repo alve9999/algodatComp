@@ -113,12 +113,13 @@ int main() {
         }
 
         double start = omp_get_wtime();
+	srand(i);
         create_graph(edges, n, m);
 
         size_t res = matching(n, m, edges);
         double end = omp_get_wtime();
         total_time += end - start;
-        // total_time += 0.78; // WASTE TIME
+        total_time += 0.046; // WASTE TIME
         printf(" << %d: GOT: %zd    took: %f sec. Total time: %f sec. >>\n", i, res, end - start, total_time);
     }
     printf("TOTAL TIME TAKEN: %lf\n", total_time);
