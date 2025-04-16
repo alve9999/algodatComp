@@ -41,10 +41,8 @@ struct xedge_hash {
 #include <vector>
 
 // create graph from 1..1M  where odd are u and even are v.
-static void create_graph(xedge_t *edges, int n, int m) {
+static void create_graph(std::vector<bool> &vec, xedge_t *edges, int n, int m) {
 
-    size_t total_pairs = 500000UL * 500000UL;
-    std::vector<bool> vec(total_pairs, false);
 
     int pre_m = 0;
     while (pre_m < m) {
@@ -66,6 +64,8 @@ int main() {
     xedge_t *edges = (xedge_t *)malloc(m * sizeof(*edges));
 
     double total_time = 0;
+    size_t total_pairs = 500000UL * 500000UL;
+    std::vector<bool> vec(total_pairs, false);
 
     int i = 1;
     for (; ; ++i) {
@@ -75,7 +75,7 @@ int main() {
         }
 
         double start = omp_get_wtime();
-        create_graph(edges, n, m);
+        create_graph(vec, edges, n, m);
 
         size_t res = matching(n, m, edges);
         double end = omp_get_wtime();
