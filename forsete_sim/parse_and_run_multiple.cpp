@@ -43,21 +43,13 @@ static void create_graph(xedge_t *edges, int n, int m) {
     std::unordered_set<xedge_t, xedge_hash> set;
 
     int pre_m = 0;
-    for (size_t u = 1; u < (size_t)n; u += 2) {
-        size_t v1,v2,v3,v4;
-        // for each u, create 4 edges to v, make sure they are unique
-        v1 = ((generate_random() % (n/2)) + 1) * 2;
-        while(v2 = ((generate_random() % (n/2)) + 1) * 2, v1 == v2);
-        while(v3 = ((generate_random() % (n/2)) + 1) * 2, (v1 == v3 || v2 == v3));
-        while(v4 = ((generate_random() % (n/2)) + 1) * 2, (v1 == v4 || v2 == v4 || v3 == v4));
-        xedge_t e1= {u, v1};
-        xedge_t e2= {u, v2};
-        xedge_t e3= {u, v3};
-        xedge_t e4= {u, v4};
-        edges[pre_m++] = e1;
-        edges[pre_m++] = e2;
-        edges[pre_m++] = e3;
-        edges[pre_m++] = e4;
+    while (pre_m < m) {
+        size_t u = (generate_random() % (n/2)) * 2 + 1;
+        size_t v = ((generate_random() % (n/2)) + 1) * 2;
+        xedge_t e = {u, v};
+        // auto [iter, inserted] = set.insert(e);
+        // if (!inserted) continue;
+        edges[pre_m++] = e;
     }
 }
 
