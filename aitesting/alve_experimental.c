@@ -84,19 +84,19 @@ static inline bool dfs_la_ts(int* graph, int* graphOffset,int graphSize,int star
     goto CONTINUE_ON_SECOND_LOOP;
 }
 
+#define NUM_THREADS 30
+
 static int parallel_pothen_fan(int* graph, int graphSize, int* graphOffset, int* v_pair, bool *u_matched){
     static bool inited = false;
     static u_i_t *stacks;
     static visit_t* visited;
-    const int max_threads = 32;
     if (!inited) {
         inited = true;
-        stacks = calloc(graphSize * max_threads, sizeof(*stacks));
+        stacks = calloc(graphSize * NUM_THREADS, sizeof(*stacks));
         visited = calloc(graphSize, sizeof(*visited));
     }
 
     // allocate stacks
-    omp_set_num_threads(max_threads);
 
     int path_found = 1;
     long matchings = 0;
@@ -116,7 +116,7 @@ static int parallel_pothen_fan(int* graph, int graphSize, int* graphOffset, int*
             }
         }
 
-        #pragma omp parallel for schedule(guided) reduction(+:matchings)
+        #pragma omp parallel for schedule(guided) reduction(+:matchings)   num_threads(NUM_THREADS)
         for(int idx = 0; idx < worklist_size; idx+=1){ // UNMATCHED u VERTICES
             int i = worklist[idx];
             // SAFETY: this read is okay. Because no unmatched u's will be visited from searches starting on other unmatches u's. only matched u's will be found.
@@ -135,56 +135,6 @@ static int parallel_pothen_fan(int* graph, int graphSize, int* graphOffset, int*
     }
     return matchings;
 }
-
-static void matchAndUpdate(int* graph, int* graphOffset, int* deg, int* pair, bool* visited, int u, int* matchingSize) {
-    if (visited[u]) return;
-    visited[u] = true;
-    for (int j = graphOffset[u]; j < (graphOffset[u+1]); j++) {
-        int v = graph[j];
-        if (!visited[v]) {
-            visited[v] = true;
-            *matchingSize += 1;
-            pair[u] = 1;
-            pair[v] = u;
-            for (int i = graphOffset[v]; i < graphOffset[v+1]; i++) {
-                int w = graph[i];
-                deg[w]--;
-                if (deg[w] == 1) {
-                    matchAndUpdate(graph, graphOffset, deg, pair, visited, w, matchingSize);
-                }
-            }
-            break;
-        }
-    }
-}
-
-static int karpSipser(int* graph, int graphSize, int* graphOffset, int* pair){
-    int* deg = (int*)malloc(graphSize * sizeof(int));
-    for (int i = 0; i < graphSize; i++) {
-        deg[i] = graphOffset[i+1] - graphOffset[i];
-    }
-    bool* visited = (bool*)calloc(graphSize, sizeof(bool));
-    int* deg1 = (int*)malloc(graphSize * sizeof(int));
-    int* deg2 = (int*)malloc(graphSize * sizeof(int));
-    int deg1Size = 0;
-    int deg2Size = 0;
-    for (int i = 1; i < graphSize; i+=2) {
-        if (deg[i] == 1) {
-            deg1[deg1Size++] = i;
-        } else{
-            deg2[deg2Size++] = i;
-        }
-    }
-    int matchingSize = 0;
-    for(int i = 0; i < deg1Size; i++) {
-        matchAndUpdate(graph, graphOffset, deg, pair, visited, deg1[i], &matchingSize);
-    }
-    for(int i = 0; i < deg2Size; i++) {
-        matchAndUpdate(graph, graphOffset, deg, pair, visited, deg2[i], &matchingSize);
-    }
-    return matchingSize;
-}
-
 
 static int maximumBipartiteMatching(int* graph, int graphSize, int* graphOffset) {
     graphSize++;
@@ -225,37 +175,90 @@ size_t matching(size_t n, size_t m, xedge_t e[]) {
     static int* currentIndices;
     static int* graphFlat;
     static int* graphOffset;
+    static int *t_offsets[NUM_THREADS];
+
+    n += 1;
 
     if (!inited) {
         inited = true;
-        edgeCounts = (int*)calloc(n + 1, sizeof(int));
-        currentIndices = (int*)calloc(n + 1, sizeof(int));
-        graphOffset = (int*)calloc(n + 2, sizeof(int)); // n+2 for safer bounds
+        edgeCounts = (int*)calloc(n , sizeof(int));
+        currentIndices = (int*)calloc(n, sizeof(int));
+        graphOffset = (int*)calloc(n, sizeof(int));
+        graphFlat = (int*)malloc((4*m) * sizeof(int));
+        for (int i = 0; i < NUM_THREADS; ++i) {
+            t_offsets[i] = calloc(n, sizeof(*t_offsets));
+        }
     }
 
-    memset(edgeCounts, 0, (n + 1) * sizeof(int));
-    memset(currentIndices, 0, (n + 1) * sizeof(int));
-
-    for (size_t i = 0; i < m; i++) {
-        edgeCounts[e[i].u]++;
-        edgeCounts[e[i].v]++;
+    memset(edgeCounts, 0, n  * sizeof(int));
+    memset(currentIndices, 0, n  * sizeof(int));
+    memset(graphOffset, 0, n*sizeof(int));
+    #pragma omp parallel for schedule(static) num_threads(NUM_THREADS)
+    for (int i = 0; i < NUM_THREADS; ++i) {
+        memset(t_offsets[i], 0, (n * sizeof(*t_offsets)));
     }
 
-    graphOffset[0] = 0;
-    for (size_t i = 1; i <= n; i++) {
-        graphOffset[i] = graphOffset[i - 1] + edgeCounts[i - 1];
-    }
-    graphOffset[n + 1] = graphOffset[n] + edgeCounts[n];
+    // each thread has offsets for each node
 
-    size_t totalEdges = graphOffset[n+1];
-    graphFlat = (int*)realloc(graphFlat, totalEdges * sizeof(int));
+    // first count, for each thread, how many nodes each of them have
+    // (disjoint edges, can have same nodes)
+    // basically local degrees for nodes
+    //
+    #pragma omp parallel for schedule(static) num_threads(NUM_THREADS)
+    for (size_t i = 0; i < m; ++i) {
+        t_offsets[omp_get_thread_num()][e[i].u]++;
+        t_offsets[omp_get_thread_num()][e[i].v]++;
+    }
+
+    // convert to thread local offsets and global degrees
+    #pragma omp parallel for schedule(static) num_threads(NUM_THREADS)
+    for (size_t i = 1; i < n; ++i) {
+        for (int j = 0; j < NUM_THREADS; ++j) {
+            graphOffset[i+1] += t_offsets[j][i];
+        }
+        for (size_t j = 1; j < NUM_THREADS; ++j) {
+            t_offsets[j][i] += t_offsets[j - 1][i];
+        }
+    }
+
+    // convert to global offsets
+    #pragma omp single
+    {
+        graphOffset[0] = 0;
+        for (size_t i = 1; i < n; ++i) {
+            graphOffset[i] += graphOffset[i - 1];
+        }
+    }
+
+
+    // fill the edges
+    #pragma omp parallel for schedule(static) num_threads(NUM_THREADS)
+    for (size_t i = 0 ; i < m; ++i) {
+        xedge_t ed = e[i];
+        graphFlat[graphOffset[ed.u] + --t_offsets[omp_get_thread_num()][ed.u]] = ed.v;
+        graphFlat[graphOffset[ed.v] + --t_offsets[omp_get_thread_num()][ed.v]] = ed.u;
+    }
+
+    // for (size_t i = 0; i < m; i++) {
+    //     edgeCounts[e[i].u]++;
+    //     edgeCounts[e[i].v]++;
+    // }
+
+    // graphOffset[0] = 0;
+    // for (size_t i = 1; i <= n; i++) {
+    //     graphOffset[i] = graphOffset[i - 1] + edgeCounts[i - 1];
+    // }
+    // graphOffset[n + 1] = graphOffset[n] + edgeCounts[n];
+
+    // size_t totalEdges = graphOffset[n+1];
+    // graphFlat = (int*)realloc(graphFlat, totalEdges * sizeof(int));
     // Populate flat graph
-    for (size_t i = 0; i < m; i++) {
-        int u = e[i].u;
-        int v = e[i].v;
-        graphFlat[graphOffset[u] + currentIndices[u]++] = v;
-        graphFlat[graphOffset[v] + currentIndices[v]++] = u;
-    }
+    // for (size_t i = 0; i < m; i++) {
+    //     int u = e[i].u;
+    //     int v = e[i].v;
+    //     graphFlat[graphOffset[u] + currentIndices[u]++] = v;
+    //     graphFlat[graphOffset[v] + currentIndices[v]++] = u;
+    // }
 
 
     size_t maxMatching = maximumBipartiteMatching(graphFlat, n, graphOffset);
