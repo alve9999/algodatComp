@@ -83,7 +83,7 @@ static inline bool dfs_la_ts(const int* graph, const int* graphOffset,int start,
 // pothen-fan threads
 #define DFS_NR_THREADS 32
 // graph-creation threads. These need to be fewer, want one per real core on a NUMA node
-#define CREATION_NR_THREADS 5
+#define CREATION_NR_THREADS 4
 
 static size_t parallel_pothen_fan(const int* graph, int graphSize, const int* graphOffset, int* v_pair, bool *u_matched){
     static u_i_t *stacks;
@@ -165,9 +165,8 @@ size_t matching(size_t n, size_t m, xedge_t e[]) {
     memset(graphOffset, 0, n*sizeof(int));
 
     #pragma omp parallel for schedule(static) num_threads(CREATION_NR_THREADS)
-    for (int i = 0; i < CREATION_NR_THREADS; ++i) {
+    for (int i = 0; i < CREATION_NR_THREADS; ++i)
         memset(t_offsets[i], 0, (n * sizeof(*t_offsets)));
-    }
 
     // each thread has offsets for each node
 
@@ -176,33 +175,32 @@ size_t matching(size_t n, size_t m, xedge_t e[]) {
     // basically local degrees for nodes
     #pragma omp parallel for schedule(static) num_threads(CREATION_NR_THREADS)
     for (size_t i = 0; i < m; ++i) {
-        t_offsets[omp_get_thread_num()][e[i].u]++;
-        t_offsets[omp_get_thread_num()][e[i].v]++;
+        const int tid = omp_get_thread_num();
+        t_offsets[tid][e[i].u]++;
+        t_offsets[tid][e[i].v]++;
     }
     // convert to thread local offsets and global degrees
     #pragma omp parallel for schedule(static) num_threads(CREATION_NR_THREADS)
     for (size_t i = 1; i < n; ++i) {
-        for (int j = 0; j < CREATION_NR_THREADS; ++j) {
+        for (int j = 0; j < CREATION_NR_THREADS; ++j)
             graphOffset[i+1] += t_offsets[j][i];
-        }
-        for (size_t j = 1; j < CREATION_NR_THREADS; ++j) {
+        for (size_t j = 1; j < CREATION_NR_THREADS; ++j)
             t_offsets[j][i] += t_offsets[j - 1][i];
-        }
     }
     // convert to global offsets
     #pragma omp single
     {
         graphOffset[0] = 0;
-        for (size_t i = 1; i < n; ++i) {
+        for (size_t i = 1; i < n; ++i)
             graphOffset[i] += graphOffset[i - 1];
-        }
     }
     // fill the edges
     #pragma omp parallel for schedule(static) num_threads(CREATION_NR_THREADS)
     for (size_t i = 0 ; i < m; ++i) {
+        const int tid = omp_get_thread_num();
         xedge_t ed = e[i];
-        graphFlat[graphOffset[ed.u] + --t_offsets[omp_get_thread_num()][ed.u]] = ed.v;
-        graphFlat[graphOffset[ed.v] + --t_offsets[omp_get_thread_num()][ed.v]] = ed.u;
+        graphFlat[graphOffset[ed.u] + --t_offsets[tid][ed.u]] = ed.v;
+        graphFlat[graphOffset[ed.v] + --t_offsets[tid][ed.v]] = ed.u;
     }
 
     return maximumBipartiteMatching(graphFlat, n, graphOffset);
