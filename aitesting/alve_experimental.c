@@ -169,6 +169,9 @@ static int maximumBipartiteMatching(int* graph, int graphSize, int* graphOffset)
     return init_matchings + main_matchings;
 }
 
+#undef NUM_THREADS
+#define NUM_THREADS 5
+
 size_t matching(size_t n, size_t m, xedge_t e[]) {
     static bool inited = false;
     static int* edgeCounts;
